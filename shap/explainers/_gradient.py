@@ -527,8 +527,8 @@ class _PyTorchGradient(Explainer):
             for j in range(X[0].shape[0]):
                 # fill in the samples arrays
                 for k in range(nsamples):
-                    rind = np.random.choice(self.data[0].shape[0])
-                    t = np.random.uniform()
+
+                    all_x, all_x_idxs = [], []
                     for a in range(len(X)):
                         if self.local_smoothing > 0:
                             # local smoothing is added to the base input, unlike in the TF gradient explainer
@@ -536,6 +536,28 @@ class _PyTorchGradient(Explainer):
                                 * self.local_smoothing
                         else:
                             x = X[a][j].clone().detach()
+                        all_x.append(x)
+                        all_x_idxs.append(torch.nonzero(~torch.isnan(x)))  # all the positions where x is not nan
+
+                    # get a valid rind
+                    counter, rind_found = 0, False
+                    while not rind_found and (counter < 1000):
+                        counter += 1
+                        rind = np.random.choice(self.data[0].shape[0])
+                        is_rind_fine = True  # is this rind fine?
+                        for a in range(len(X)):
+                            # where x is not nan, rind should be not nan - other places rind can be nan or not
+                            # ie., we allow those samples which have more filled data than x to be reference
+                            if torch.isnan(self.model_inputs[a][rind][all_x_idxs[a]]).any():
+                                is_rind_fine = False
+                        if is_rind_fine:
+                            rind_found = True
+                    if not rind_found:
+                        raise Exception('couldn\'t find a valid reference sample')
+
+                    t = np.random.uniform()
+                    for a in range(len(X)):
+                        x = all_x[a]
                         samples_input[a][k] = (t * x + (1 - t) * (self.model_inputs[a][rind]).clone().detach()).\
                             clone().detach()
                         if self.input_handle is None:
